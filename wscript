@@ -1,12 +1,9 @@
-#! /usr/bin/env python
+# !/usr/bin/python3
 # encoding: utf-8
 
 import os
-from Configure import g_maxlen
-import Params
-import time
-import Task
-import re
+
+from waflib import Logs, Options, Task, Utils
 
 APPNAME='a2jmidid'
 VERSION='8'
@@ -15,124 +12,82 @@ VERSION='8'
 srcdir = '.'
 blddir = 'build'
 
-def create_gitversion_gen(bld, header='gitversion.h', define=None):
-    cmd = '../gitversion_regenerate.sh ${TGT}'
-    if define:
-        cmd += " " + define
-    cls = Task.simple_task_type('gitversion', cmd, color='BLUE')
-    cls.must_run = lambda self: True
-    #cls.before = 'cxx'
-
-    def sg(self):
-        rt = Params.h_file(self.m_outputs[0].abspath(self.env()))
-        return rt
-    cls.signature = sg
-
-    #def se(self):
-    #    r = sg(self)
-    #    return (r, r, r, r, r)
-    #cls.cache_sig = property(sg, None)
-    cls.cache_sig = None
-
-    tsk = cls('gitversion', bld.env().copy())
-    tsk.m_inputs = []
-    tsk.m_outputs = [bld.path.find_or_declare(header)]
-    tsk.prio = 1 # execute this task first
-
-def display_msg(msg, status = None, color = None):
-    sr = msg
-    global g_maxlen
-    g_maxlen = max(g_maxlen, len(msg))
-    if status:
-        print "%s :" % msg.ljust(g_maxlen),
-        Params.pprint(color, status)
-    else:
-        print "%s" % msg.ljust(g_maxlen)
-
-def set_options(opt):
-    opt.tool_options('compiler_cc')
+def options(opt):
+    opt.load('compiler_c')
     opt.add_option('--enable-pkg-config-dbus-service-dir', action='store_true', default=False, help='force D-Bus service install dir to be one returned by pkg-config')
     opt.add_option('--disable-dbus', action='store_true', default=False, help="Don't enable D-Bus support even if required dependencies are present")
     opt.add_option('--mandir', type='string', help="Manpage directory [Default: <prefix>/share/man]")
 
 def configure(conf):
-    conf.check_tool('compiler_cc')
+    conf.load('compiler_c')
 
-    conf.check_pkg('alsa', mandatory=True)
-    conf.check_pkg('jack', vnum="0.109.0", mandatory=True)
-    if not Params.g_options.disable_dbus:
-        conf.check_pkg('dbus-1', mandatory=False, pkgvars=['session_bus_services_dir'])
-        conf.env['DBUS_ENABLED'] = 'LIB_DBUS-1' in conf.env
-    else:
-        conf.env['DBUS_ENABLED'] = False
+    conf.check_cfg(atleast_pkgconfig_version='1.6.0')
+
+    conf.check_cfg(package='alsa', mandatory=True, uselib_store='ALSA', args=['--cflags', '--libs'])
+    conf.check_cfg(package='jack', mandatory=True, atleast_version='0.109.0', uselib_store='JACK', args=['--cflags', '--libs'])
+
+    conf.env['DBUS_ENABLED'] = False
+    if not Options.options.disable_dbus:
+        if conf.check_cfg(package='dbus-1', mandatory=False, uselib_store='DBUS', args=['--cflags', '--libs']):
+            conf.env['DBUS_ENABLED'] = True
+            conf.check_cfg(package='dbus-1', mandatory=False, uselib_store='DBUS', variables=['session_bus_services_dir'])
 
     conf.env['LIB_DL'] = ['dl']
     conf.env['LIB_PTHREAD'] = ['pthread']
 
-    #conf.check_header('expat.h', mandatory=True)
-    #conf.env['LIB_EXPAT'] = ['expat']
-    conf.check_header('getopt.h', mandatory=True)
+    conf.check(header_name='getopt.h', features='c cprogram')
 
     if conf.env['DBUS_ENABLED']:
-        if Params.g_options.enable_pkg_config_dbus_service_dir:
-            conf.env['DBUS_SERVICES_DIR'] = conf.env['DBUS-1_SESSION_BUS_SERVICES_DIR'][0]
+        if Options.options.enable_pkg_config_dbus_service_dir:
+            conf.env['DBUS_SERVICES_DIR'] = conf.env['DBUS_session_bus_services_dir']
         else:
             conf.env['DBUS_SERVICES_DIR'] = os.path.normpath(conf.env['PREFIX'] + '/share/dbus-1/services')
 
-        conf.check_tool('misc')             # dbus service file subst tool
-
-    if Params.g_options.mandir:
-        conf.env['MANDIR'] = Params.g_options.mandir
+    if Options.options.mandir:
+        conf.env['MANDIR'] = Options.options.mandir
     else:
         conf.env['MANDIR'] = conf.env['PREFIX'] + '/share/man'
 
     conf.define('A2J_VERSION', VERSION)
     conf.write_config_header('config.h')
 
-    gitrev = None
-    if os.access('gitversion.h', os.R_OK):
-        data = file('gitversion.h').read()
-        m = re.match(r'^#define GIT_VERSION "([^"]*)"$', data)
-        if m != None:
-            gitrev = m.group(1)
-
-    print
-    display_msg("==================")
     version_msg = "a2jmidid-" + VERSION
-    if gitrev:
-        version_msg += " exported from " + gitrev
-    else:
-        version_msg += " git revision will checked and eventually updated during build"
-    print version_msg
-    print
+    conf.msg('Version', version_msg)
 
-    display_msg("Install prefix", conf.env['PREFIX'], 'CYAN')
+    conf.msg('Install prefix', Options.options.prefix)
+    conf.msg('D-Bus support', conf.env['DBUS_ENABLED'])
+
     if conf.env['DBUS_ENABLED']:
-        have_dbus_status = "yes"
-    else:
-        have_dbus_status = "no"
-    display_msg("D-Bus support", have_dbus_status)
-    if conf.env['DBUS_ENABLED']:
-        display_msg('D-Bus service install directory', conf.env['DBUS_SERVICES_DIR'], 'CYAN')
-        if conf.env['DBUS_SERVICES_DIR'] != conf.env['DBUS-1_SESSION_BUS_SERVICES_DIR'][0]:
-            print
-            print Params.g_colors['RED'] + "WARNING: D-Bus session services directory as reported by pkg-config is"
-            print Params.g_colors['RED'] + "WARNING:",
-            print Params.g_colors['CYAN'] + conf.env['DBUS-1_SESSION_BUS_SERVICES_DIR'][0]
-            print Params.g_colors['RED'] + 'WARNING: but service file will be installed in'
-            print Params.g_colors['RED'] + "WARNING:",
-            print Params.g_colors['CYAN'] + conf.env['DBUS_SERVICES_DIR']
-            print Params.g_colors['RED'] + 'WARNING: You may need to adjust your D-Bus configuration after installing'
-            print 'WARNING: You can override dbus service install directory'
-            print 'WARNING: with --enable-pkg-config-dbus-service-dir option to this script'
-            print Params.g_colors['NORMAL'],
-    print
+        conf.msg('D-Bus service install directory', conf.env['DBUS_SERVICES_DIR'])
+        if conf.env['DBUS_SERVICES_DIR'] != conf.env['DBUS_session_bus_services_dir']:
+            conf.msg('WARNING: D-Bus session services will be installed in', conf.env['DBUS_SERVICES_DIR'])
+            conf.msg('Use --enable-pkg-config-dbus-service-dir to force pkgconfig directory')
 
 def build(bld):
-    if not os.access('gitversion.h', os.R_OK):
-        create_gitversion_gen(bld)
 
-    prog = bld.create_obj('cc', 'program')
+    # Build gitversion if not found
+    if not os.access('gitversion.h', os.R_OK):
+        def post_run(self):
+            sg = Utils.h_file(self.outputs[0].abspath(self.env))
+            #print sg.encode('hex')
+            Build.bld.node_sigs[self.env.variant()][self.outputs[0].id] = sg
+
+        script = bld.path.find_resource('gitversion_regenerate.sh')
+        script = script.abspath()
+
+        bld(
+                rule = '%s ${TGT}' % script,
+                name = 'gitversion',
+                runnable_status = Task.RUN_ME,
+                before = 'c',
+                color = 'BLUE',
+                post_run = post_run,
+                source = ['gitversion_regenerate.sh'],
+                target = [bld.path.find_or_declare('gitversion.h')]
+        )
+
+    prog = bld(features='c cprogram')
+
     prog.source = [
         'a2jmidid.c',
         'log.c',
@@ -140,60 +95,33 @@ def build(bld):
         'port_thread.c',
         'port_hash.c',
         'paths.c',
-        #'conf.c',
         'jack.c',
         'list.c',
         ]
 
-    if bld.env()['DBUS_ENABLED']:
+    if bld.env['DBUS_ENABLED']:
         prog.source.append('dbus.c')
         prog.source.append('dbus_iface_introspectable.c')
         prog.source.append('dbus_iface_control.c')
         prog.source.append('sigsegv.c')
 
-    prog.includes = '.' # make waf dependency tracking work
     prog.target = 'a2jmidid'
+    prog.includes = ['.']
     prog.uselib = 'ALSA JACK DL PTHREAD'
-    if bld.env()['DBUS_ENABLED']:
-        prog.uselib += " DBUS-1"
-    prog = bld.create_obj('cc', 'program')
+    if bld.env['DBUS_ENABLED']:
+        prog.uselib += " DBUS"
+
+    prog = bld(features='c cprogram')
     prog.source = 'a2jmidi_bridge.c'
     prog.target = 'a2jmidi_bridge'
     prog.uselib = 'ALSA JACK'
 
-    prog = bld.create_obj('cc', 'program')
+    prog = bld(features='c cprogram')
     prog.source = 'j2amidi_bridge.c'
     prog.target = 'j2amidi_bridge'
     prog.uselib = 'ALSA JACK'
 
-    if bld.env()['DBUS_ENABLED']:
-        # process org.gna.home.a2jmidid.service.in -> org.gna.home.a2jmidid.service
-        obj = bld.create_obj('subst')
-        obj.source = 'org.gna.home.a2jmidid.service.in'
-        obj.target = 'org.gna.home.a2jmidid.service'
-        obj.dict = {'BINDIR': bld.env()['PREFIX'] + '/bin'}
-        obj.inst_var = bld.env()['DBUS_SERVICES_DIR']
-        obj.inst_dir = '/'
-
-        install_files('PREFIX', 'bin', 'a2j_control', chmod=0755)
-        install_files('PREFIX', 'bin', 'a2j', chmod=0755)
-
-    # install man pages
-    man_pages = [
-        "a2jmidi_bridge.1",
-        "a2jmidid.1",
-        "j2amidi_bridge.1",
-        ]
-
-    if bld.env()['DBUS_ENABLED']:
-        man_pages.append("a2j.1")
-        man_pages.append("a2j_control.1")
-
-    for i in range(len(man_pages)):
-        man_pages[i] = "man/" + man_pages[i]
-
-    install_files('MANDIR', 'man1', man_pages)
-
-def dist_hook():
-    os.remove('gitversion_regenerate.sh')
-    os.system('../gitversion_regenerate.sh gitversion.h')
+def dist(ctx):
+    # This code blindly assumes it is working in the toplevel source directory.
+    if not os.path.exists('gitversion.h'):
+        os.system('./gitversion_regenerate.sh gitversion.h')
