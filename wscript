@@ -121,6 +121,30 @@ def build(bld):
     prog.target = 'j2amidi_bridge'
     prog.uselib = 'ALSA JACK'
 
+    if bld.env['DBUS_ENABLED']:
+        bld(
+            features = 'subst',
+            source = 'org.gna.home.a2jmidid.service.in',
+            target = 'org.gna.home.a2jmidid.service',
+            BINDIR = bld.env['PREFIX'] + '/bin',
+            install_path = bld.env['DBUS_SERVICES_DIR']
+        )
+
+        bld.install_files(bld.env['BINDIR'], [ "a2j", "a2j_control" ], chmod = Utils.O755)
+
+    # install man pages
+    man_pages = [
+        "man/a2jmidi_bridge.1",
+        "man/a2jmidid.1",
+        "man/j2amidi_bridge.1",
+    ]
+
+    if bld.env['DBUS_ENABLED']:
+        man_pages.append("man/a2j.1")
+        man_pages.append("man/a2j_control.1")
+
+    bld.install_files(bld.env['MANDIR'] + "/man1", man_pages)
+
 def dist(ctx):
     # This code blindly assumes it is working in the toplevel source directory.
     if not os.path.exists('gitversion.h'):
