@@ -3,3 +3,6 @@
 /.lock-wscript
 /build
 /.lock-waf_linux_build
+/gitversion.h
+/gitversion.h.tmp
+*.tar.bz2

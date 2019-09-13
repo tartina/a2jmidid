@@ -16,9 +16,6 @@ TEMP_FILE="${OUTPUT_FILE}.tmp"
 #echo $OUTPUT_FILE
 #echo $TEMP_FILE
 
-OLDPWD=`pwd`
-cd ..
-
 if test $# -eq 2
 then
   DEFINE=${2}
@@ -34,18 +31,14 @@ echo "#define ${DEFINE} \"${REV}\"" > ${TEMP_FILE}
 if test ! -f ${OUTPUT_FILE}
 then
   echo "Generated ${OUTPUT_FILE} (${REV})"
-  cp ${TEMP_FILE} ${OUTPUT_FILE}
+  mv ${TEMP_FILE} ${OUTPUT_FILE}
   if test $? -ne 0; then exit 1; fi
 else
   if ! cmp -s ${OUTPUT_FILE} ${TEMP_FILE}
   then echo "Regenerated ${OUTPUT_FILE} (${REV})"
-    cp ${TEMP_FILE} ${OUTPUT_FILE}
+    mv ${TEMP_FILE} ${OUTPUT_FILE}
     if test $? -ne 0; then exit 1; fi
   fi
 fi
-
-cd "${OLDPWD}"
-
-rm ${TEMP_FILE}
 
 exit $?
